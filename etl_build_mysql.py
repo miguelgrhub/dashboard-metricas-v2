@@ -53,7 +53,6 @@ if max_local_date and max_local_date >= max_mysql_date:
     exit(0)
 
 if max_local_date:
-    # Descargar SOLO filas nuevas
     query = f"""
         SELECT Id, Email, agency, Destination, condactivacion, Localizador, Fecha_de_creacion
         FROM data
@@ -62,7 +61,6 @@ if max_local_date:
     mode = "append"
     print(f"🔄 Descargando filas nuevas posteriores a {max_local_date}…")
 else:
-    # Descargar todo
     query = """
         SELECT Id, Email, agency, Destination, condactivacion, Localizador, Fecha_de_creacion
         FROM data
@@ -117,7 +115,7 @@ df.to_parquet(DATA_FILE, index=False)
 print(f"🎯 data_full.parquet actualizado correctamente ({len(df):,} filas).")
 
 # ===============================
-# 7️⃣ ACTUALIZAR MÉTRICAS RESUMIDAS
+# 7️⃣ MÉTRICAS RESUMIDAS
 # ===============================
 metrics_daily = (
     df.groupby("Fecha_de_creacion")
@@ -158,7 +156,7 @@ repeated.to_parquet(f"{OUT_DIR}/metrics_repeated_emails.parquet")
 print("✅ metrics_repeated_emails.parquet actualizado.")
 
 # ===============================
-# 8️⃣ RESUMEN
+# 8️⃣ RESUMEN FINAL
 # ===============================
 print("\n📊 Resumen global actualizado:")
 print(f"   Con email     : {df['has_email'].sum():,}")

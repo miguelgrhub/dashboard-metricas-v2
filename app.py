@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Dashboard v4.4 — Emails:
-- Filtros separados de Check-in y Check-out (ambos con rango desde/hasta)
-- Mantiene KPIs, gráficas, tabla, y lógica original
+Dashboard v4.2 — Emails:
+- Mantiene todo lo de v4.1 (KPIs, gráficas, tabla)
+- Nuevo filtro: rango Check-in/Check-out (ambos rangos deben cumplirse)
 """
 
 import duckdb
@@ -31,19 +31,19 @@ def _in_clause(values):
     return f"('{values}')"
 
 
-def build_where(start_date, end_date,
-                checkin_start=None, checkin_end=None,
-                checkout_start=None, checkout_end=None,
-                agency=None, dest=None, cond=None, loc=None):
+def build_where(
+    start_date, end_date,
+    checkin_start=None, checkout_end=None,
+    agency=None, dest=None, cond=None, loc=None
+):
     filters = [f"Fecha_de_creacion BETWEEN DATE '{start_date}' AND DATE '{end_date}'"]
 
-    # 🔹 Filtro independiente de Check-in
-    if checkin_start and checkin_end:
-        filters.append(f"Check_in_date BETWEEN DATE '{checkin_start}' AND DATE '{checkin_end}'")
-
-    # 🔹 Filtro independiente de Check-out
-    if checkout_start and checkout_end:
-        filters.append(f"Check_out_date BETWEEN DATE '{checkout_start}' AND DATE '{checkout_end}'")
+    # 🔹 Nuevo: exigir que el periodo de la estancia también esté dentro del rango dado
+    # Nota: nombres exactamente como en MySQL/Parquet (C mayúscula)
+    if checkin_start and checkout_end:
+        filters.append(
+            f"Check_in_date >= DATE '{checkin_start}' AND Check_out_date <= DATE '{checkout_end}'"
+        )
 
     for col, val in [
         ("agency", agency),
@@ -57,10 +57,8 @@ def build_where(start_date, end_date,
     return "WHERE " + " AND ".join(filters)
 
 
-def query_filter_options(start_date, end_date,
-                         checkin_start=None, checkin_end=None,
-                         checkout_start=None, checkout_end=None):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end)
+def query_filter_options(start_date, end_date, checkin_start=None, checkout_end=None):
+    where = build_where(start_date, end_date, checkin_start, checkout_end)
     sql = f"""
         SELECT DISTINCT agency, Destination, condactivacion, Localizador
         FROM read_parquet('{DETAIL_FULL}')
@@ -77,12 +75,9 @@ def query_filter_options(start_date, end_date,
     }
 
 
-def query_totals(start_date, end_date,
-                 checkin_start, checkin_end,
-                 checkout_start, checkout_end,
+def query_totals(start_date, end_date, checkin_start, checkout_end,
                  agency=None, dest=None, cond=None, loc=None):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     regex = r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$"
     sql = f"""
         SELECT
@@ -102,12 +97,9 @@ def query_totals(start_date, end_date,
         return con.execute(sql).fetchdf().iloc[0].to_dict()
 
 
-def query_dups_and_sendables(start_date, end_date,
-                             checkin_start, checkin_end,
-                             checkout_start, checkout_end,
+def query_dups_and_sendables(start_date, end_date, checkin_start, checkout_end,
                              agency=None, dest=None, cond=None, loc=None):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     regex = r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$"
     sql = f"""
         WITH base AS (
@@ -127,12 +119,9 @@ def query_dups_and_sendables(start_date, end_date,
         return con.execute(sql).fetchdf().iloc[0].to_dict()
 
 
-def query_vacios_detalle(start_date, end_date,
-                         checkin_start, checkin_end,
-                         checkout_start, checkout_end,
+def query_vacios_detalle(start_date, end_date, checkin_start, checkout_end,
                          agency=None, dest=None, cond=None, loc=None):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     sql = f"""
         SELECT
             CAST(Fecha_de_creacion AS DATE) AS fecha,
@@ -150,12 +139,9 @@ def query_vacios_detalle(start_date, end_date,
         return con.execute(sql).fetchdf()
 
 
-def query_invalid_emails(start_date, end_date,
-                         checkin_start, checkin_end,
-                         checkout_start, checkout_end,
+def query_invalid_emails(start_date, end_date, checkin_start, checkout_end,
                          agency=None, dest=None, cond=None, loc=None, limit=20):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     regex = r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$"
     sql = f"""
         SELECT Id, Localizador, Email
@@ -169,12 +155,9 @@ def query_invalid_emails(start_date, end_date,
         return con.execute(sql).fetchdf()
 
 
-def query_top_domains_valid(start_date, end_date,
-                            checkin_start, checkin_end,
-                            checkout_start, checkout_end,
+def query_top_domains_valid(start_date, end_date, checkin_start, checkout_end,
                             agency=None, dest=None, cond=None, loc=None, limit=10):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     regex = r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$"
     sql = f"""
         SELECT domain, COUNT(*) AS cnt
@@ -199,12 +182,9 @@ def query_top_domains_valid(start_date, end_date,
         return con.execute(sql).fetchdf()
 
 
-def query_top_duplicated_emails(start_date, end_date,
-                                checkin_start, checkin_end,
-                                checkout_start, checkout_end,
+def query_top_duplicated_emails(start_date, end_date, checkin_start, checkout_end,
                                 agency=None, dest=None, cond=None, loc=None, limit=20):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     regex = r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$"
     sql = f"""
         SELECT em AS Email, COUNT(*) AS occurrences
@@ -224,12 +204,9 @@ def query_top_duplicated_emails(start_date, end_date,
         return con.execute(sql).fetchdf()
 
 
-def query_enviables_por_dia(start_date, end_date,
-                            checkin_start, checkin_end,
-                            checkout_start, checkout_end,
+def query_enviables_por_dia(start_date, end_date, checkin_start, checkout_end,
                             agency=None, dest=None, cond=None, loc=None):
-    where = build_where(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end,
-                        agency, dest, cond, loc)
+    where = build_where(start_date, end_date, checkin_start, checkout_end, agency, dest, cond, loc)
     regex = r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$"
     sql = f"""
         SELECT
@@ -260,12 +237,17 @@ def kpi_card(value, title, color="primary"):
 # =========================================================
 # APP
 # =========================================================
+# ==========================
+# Obtener rangos de fechas
+# ==========================
 with duckdb.connect() as con:
+    # Rango de creación (Fecha_de_creacion)
     min_date, max_date = con.execute("""
         SELECT min(Fecha_de_creacion), max(Fecha_de_creacion)
         FROM read_parquet(?)
     """, [DETAIL_FULL]).fetchone()
 
+    # Rango real de Check-in / Check-out
     ci_min, ci_max, co_min, co_max = con.execute("""
         SELECT 
             min(Check_in_date), max(Check_in_date),
@@ -274,15 +256,16 @@ with duckdb.connect() as con:
     """, [DETAIL_FULL]).fetchone()
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.COSMO])
-app.title = "Dashboard Completo — Emails (v4.4)"
+app.title = "Dashboard Completo — Emails (v4.2)"
 
+# Opciones iniciales sin restringir por check-in/out
 _init_opts = query_filter_options(min_date, max_date)
 
 app.layout = dbc.Container([
     html.H2("📊 Dashboard Completo de Métricas de Emails", className="text-center my-4"),
     html.Div(f"📅 Datos actualizados hasta: {max_date}", className="text-center text-secondary mb-4"),
 
-    # FILTROS DE FECHAS SEPARADOS
+    # FILTROS DE FECHA
     dbc.Row([
         dbc.Col([
             html.Label("Rango de creación"),
@@ -296,26 +279,17 @@ app.layout = dbc.Container([
             ),
         ], md=3),
         dbc.Col([
-            html.Label("Rango de Check-in"),
+            html.Label("Rango de Check-in / Check-out"),
             dcc.DatePickerRange(
-                id="f-checkin",
-                min_date_allowed=ci_min,
-                max_date_allowed=ci_max,
+                id="f-ckin-ckout",
+                min_date_allowed=min(ci_min, co_min),
+                max_date_allowed=max(ci_max, co_max),
                 start_date=ci_min,
-                end_date=ci_max,
-                display_format="YYYY-MM-DD"
-            ),
-        ], md=3),
-        dbc.Col([
-            html.Label("Rango de Check-out"),
-            dcc.DatePickerRange(
-                id="f-checkout",
-                min_date_allowed=co_min,
-                max_date_allowed=co_max,
-                start_date=co_min,
                 end_date=co_max,
                 display_format="YYYY-MM-DD"
             ),
+            html.Small(f"📆 Rango disponible: {ci_min} → {co_max}",
+                       className="text-muted"),
         ], md=3),
         dbc.Col([
             html.Br(),
@@ -378,7 +352,7 @@ app.layout = dbc.Container([
         dbc.Col(dcc.Graph(id="graf-top-duplicados"), md=6),
     ]),
 
-    html.H4("📈 Enviables por día (por Agency y Condactivacion)", className="mt-4"),
+    html.H4("📈 Enviables por día (por Agency y Condactivación)", className="mt-4"),
     dcc.Graph(id="graf-enviables-dia"),
 
     html.H4("📬 Ejemplos de correos inválidos (regex avanzado)", className="mt-4"),
@@ -394,9 +368,11 @@ app.layout = dbc.Container([
     )
 ], fluid=True)
 
+
 # =========================================================
 # CALLBACKS
 # =========================================================
+
 @app.callback(
     Output("f-agency", "options"),
     Output("f-dest", "options"),
@@ -404,15 +380,11 @@ app.layout = dbc.Container([
     Output("f-loc", "options"),
     Input("f-fechas", "start_date"),
     Input("f-fechas", "end_date"),
-    Input("f-checkin", "start_date"),
-    Input("f-checkin", "end_date"),
-    Input("f-checkout", "start_date"),
-    Input("f-checkout", "end_date"),
+    Input("f-ckin-ckout", "start_date"),
+    Input("f-ckin-ckout", "end_date"),
 )
-def actualizar_opciones_por_fecha(start_date, end_date,
-                                  checkin_start, checkin_end,
-                                  checkout_start, checkout_end):
-    opts = query_filter_options(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end)
+def actualizar_opciones_por_fecha(start_date, end_date, ckin_start, ckout_end):
+    opts = query_filter_options(start_date, end_date, ckin_start, ckout_end)
     return (
         [{"label": v, "value": v} for v in opts["agency"]],
         [{"label": v, "value": v} for v in opts["Destination"]],
@@ -437,55 +409,60 @@ def actualizar_opciones_por_fecha(start_date, end_date,
     Input("btn-aplicar", "n_clicks"),
     State("f-fechas", "start_date"),
     State("f-fechas", "end_date"),
-    State("f-checkin", "start_date"),
-    State("f-checkin", "end_date"),
-    State("f-checkout", "start_date"),
-    State("f-checkout", "end_date"),
+    State("f-ckin-ckout", "start_date"),
+    State("f-ckin-ckout", "end_date"),
     State("f-agency", "value"),
     State("f-dest", "value"),
     State("f-cond", "value"),
     State("f-loc", "value"),
 )
-def actualizar_todo(n, start_date, end_date,
-                    checkin_start, checkin_end,
-                    checkout_start, checkout_end,
-                    agency, dest, cond, loc):
+def actualizar_dashboard(n, start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc):
     if not n:
         raise dash.exceptions.PreventUpdate
 
-    totals = query_totals(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
-    dups = query_dups_and_sendables(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
-    vacios = query_vacios_detalle(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
-    invalidos = query_invalid_emails(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
-    dominios = query_top_domains_valid(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
-    duplicados = query_top_duplicated_emails(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
-    enviables_dia = query_enviables_por_dia(start_date, end_date, checkin_start, checkin_end, checkout_start, checkout_end, agency, dest, cond, loc)
+    r = query_totals(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    total, con_em, vacios, validos = int(r["total"] or 0), int(r["con_email"] or 0), int(r["vacios"] or 0), int(r["validos"] or 0)
 
-    fig_bar = px.bar(
-        pd.DataFrame({
-            "Tipo": ["Con email", "Vacíos", "Válidos", "Duplicados", "Enviables"],
-            "Valor": [totals["con_email"], totals["vacios"], totals["validos"], dups["duplicates_rows"], dups["unique_valid"]]
-        }),
-        x="Tipo", y="Valor", title="📊 Comparativo General"
+    d = query_dups_and_sendables(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    dups, enviables = int(d["duplicates_rows"] or 0), int(d["unique_valid"] or 0)
+
+    fig_tot = px.bar(
+        x=["Total", "Con email", "Válidos", "Vacíos", "Duplicados", "Enviables"],
+        y=[total, con_em, validos, vacios, dups, enviables],
+        text=[f"{v:,}" for v in [total, con_em, validos, vacios, dups, enviables]],
+        title=f"Totales ({start_date} a {end_date}) | Check-in/out: {ckin_start} → {ckout_end}"
     )
+    fig_tot.update_traces(textposition="outside")
 
-    fig_vacios_dia = px.line(vacios, x="fecha", y="vacios", color="agency", title="📅 Vacíos por día (por agencia)")
-    fig_dominios = px.bar(dominios, x="domain", y="cnt", title="🌐 Top dominios válidos")
-    fig_dups = px.bar(duplicados, x="Email", y="occurrences", title="📩 Top duplicados")
-    fig_enviables = px.line(enviables_dia, x="fecha", y="enviables", color="agency", title="📈 Enviables por día")
+    df_vacios = query_vacios_detalle(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    fig_vacios = px.bar(title="Sin vacíos en el rango seleccionado") if df_vacios.empty else \
+        px.bar(df_vacios, x="fecha", y="vacios", color="destino", hover_data=["flujo", "agency"], title=f"Vacíos por día")
+
+    invalids = query_invalid_emails(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    tbl = invalids.to_dict("records")
+
+    dom = query_top_domains_valid(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    fig_dom = px.bar(dom, x="domain", y="cnt", title="Top dominios (emails válidos)")
+
+    dup = query_top_duplicated_emails(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    fig_dup = px.bar(dup.sort_values("occurrences"), x="occurrences", y="Email", orientation="h", title="Top emails duplicados (válidos)")
+
+    df_env = query_enviables_por_dia(start_date, end_date, ckin_start, ckout_end, agency, dest, cond, loc)
+    fig_env = px.bar(title="Sin datos de enviables en el rango seleccionado") if df_env.empty else \
+        px.line(df_env, x="fecha", y="enviables", color="agency", line_dash="flujo",
+                title="Enviables por día (por Agency y Condactivación)", markers=True)
+
+    fig_env.update_layout(xaxis_title=None, yaxis_title="Emails únicos válidos")
 
     return (
-        kpi_card(totals["total"], "Total", "secondary"),
-        kpi_card(totals["con_email"], "Con Email", "info"),
-        kpi_card(totals["vacios"], "Vacíos", "warning"),
-        kpi_card(totals["validos"], "Válidos", "success"),
-        kpi_card(dups["duplicates_rows"], "Duplicados", "danger"),
-        kpi_card(dups["unique_valid"], "Enviables", "primary"),
-        fig_bar, fig_vacios_dia,
-        invalidos.to_dict("records"),
-        fig_dominios, fig_dups, fig_enviables
+        kpi_card(total, "Total", "secondary"),
+        kpi_card(con_em, "Con email", "info"),
+        kpi_card(vacios, "Vacíos", "warning"),
+        kpi_card(validos, "Válidos", "success"),
+        kpi_card(dups, "Duplicados", "danger"),
+        kpi_card(enviables, "Enviables", "dark"),
+        fig_tot, fig_vacios, tbl, fig_dom, fig_dup, fig_env
     )
 
-
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=7860)
+    app.run(host="0.0.0.0", port=7860, debug=True)
